@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Pause, Play, RotateCcw } from 'lucide-react';
+import { Pause, Play, RotateCcw, Volume2, VolumeX } from 'lucide-react';
 import { renderFilmFrame } from '../engine/filmRenderer';
-import { AnimationStyle, BeatKey, CharacterLook, StoryboardBeat } from '../types';
+import { AnimationStyle, BeatClipAudio, BeatKey, CharacterLook, StoryboardBeat } from '../types';
+import { decodeAudioBase64 } from '../utils/audio';
 
 interface StaticThumbnailProps {
   beat: StoryboardBeat;
@@ -33,6 +34,7 @@ export const FilmStyleThumbnail: React.FC<StaticThumbnailProps> = ({
       style,
       look,
       showSubtitles: false,
+      isSpeaking: false,
     });
   }, [beat, style, look, timeOffset]);
 
@@ -50,6 +52,7 @@ interface FilmCanvasPlayerProps {
   beats: StoryboardBeat[];
   style: AnimationStyle;
   look: CharacterLook;
+  audioMap: Partial<Record<BeatKey, BeatClipAudio>>;
   activeBeatOnly?: BeatKey | null;
   authorName?: string;
   showCreditAtEnd?: boolean;
@@ -60,6 +63,7 @@ export const FilmCanvasPlayer: React.FC<FilmCanvasPlayerProps> = ({
   beats,
   style,
   look,
+  audioMap,
   activeBeatOnly = null,
   authorName = 'Dahyun',
   showCreditAtEnd = true,
@@ -67,6 +71,7 @@ export const FilmCanvasPlayer: React.FC<FilmCanvasPlayerProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
 
   const selectedBeats = activeBeatOnly
     ? beats.filter((b) => b.id === activeBeatOnly)
@@ -81,12 +86,114 @@ export const FilmCanvasPlayer: React.FC<FilmCanvasPlayerProps> = ({
   const rafRef = useRef<number | null>(null);
   const lastWallRef = useRef<number>(0);
 
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
+  const activeSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const decodedCacheRef = useRef<Record<string, AudioBuffer>>({});
+  const triggeredBeatsRef = useRef<Set<BeatKey>>(new Set());
+  const speakingUntilRef = useRef<number>(0);
+
   // Reset timeline if activeBeatOnly changes
   useEffect(() => {
+    stopAudioSource();
+    triggeredBeatsRef.current.clear();
     setIsPlaying(false);
     currentTimeRef.current = minTime;
     setCurrentTime(minTime);
   }, [activeBeatOnly, minTime]);
+
+  useEffect(() => {
+    if (gainNodeRef.current) {
+      gainNodeRef.current.gain.value = isMuted ? 0 : 1;
+    }
+    if (isMuted && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+  }, [isMuted]);
+
+  function stopAudioSource() {
+    if (activeSourceRef.current) {
+      try {
+        activeSourceRef.current.stop();
+      } catch {
+        // already stopped
+      }
+      activeSourceRef.current.disconnect();
+      activeSourceRef.current = null;
+    }
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    speakingUntilRef.current = 0;
+  }
+
+  async function ensureAudioContext(): Promise<AudioContext> {
+    if (!audioCtxRef.current) {
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      audioCtxRef.current = new AudioCtx();
+    }
+    if (!gainNodeRef.current) {
+      gainNodeRef.current = audioCtxRef.current.createGain();
+      gainNodeRef.current.gain.value = isMuted ? 0 : 1;
+      gainNodeRef.current.connect(audioCtxRef.current.destination);
+    }
+    if (audioCtxRef.current.state === 'suspended') {
+      await audioCtxRef.current.resume();
+    }
+    return audioCtxRef.current;
+  }
+
+  function speakWithBrowserFallback(beat: StoryboardBeat) {
+    if (isMuted || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(beat.englishLines);
+    utterance.lang = 'en-US';
+    utterance.rate = 0.98;
+    const voices = window.speechSynthesis.getVoices();
+    const enVoice =
+      voices.find((v) => v.lang.startsWith('en-US') && /natural|google|samantha|jenny|aria/i.test(v.name)) ||
+      voices.find((v) => v.lang.startsWith('en-US')) ||
+      voices.find((v) => v.lang.startsWith('en'));
+    if (enVoice) utterance.voice = enVoice;
+
+    speakingUntilRef.current = beat.endSec - 0.3;
+    utterance.onend = () => {
+      speakingUntilRef.current = 0;
+    };
+    window.speechSynthesis.speak(utterance);
+  }
+
+  async function triggerBeatAudio(beat: StoryboardBeat, offsetIntoAudio = 0) {
+    const clip = audioMap[beat.id];
+    if (!clip?.audioBase64) {
+      speakWithBrowserFallback(beat);
+      return;
+    }
+
+    try {
+      const ctx = await ensureAudioContext();
+      const cacheKey = `${beat.id}:${clip.audioBase64.slice(0, 32)}:${clip.audioBase64.length}`;
+      let buffer = decodedCacheRef.current[cacheKey];
+      if (!buffer) {
+        buffer = await decodeAudioBase64(ctx, clip.audioBase64);
+        decodedCacheRef.current[cacheKey] = buffer;
+      }
+
+      if (offsetIntoAudio >= buffer.duration) return;
+
+      stopAudioSource();
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      src.connect(gainNodeRef.current ?? ctx.destination);
+      src.start(0, Math.max(0, offsetIntoAudio));
+      activeSourceRef.current = src;
+      speakingUntilRef.current = currentTimeRef.current + (buffer.duration - offsetIntoAudio);
+    } catch {
+      speakWithBrowserFallback(beat);
+    }
+  }
 
   // Draw current frame whenever static dependencies or time update
   useEffect(() => {
@@ -114,10 +221,11 @@ export const FilmCanvasPlayer: React.FC<FilmCanvasPlayerProps> = ({
       style,
       look,
       showSubtitles: true,
+      isSpeaking: isPlaying && currentTime <= speakingUntilRef.current,
       authorName,
       showEndCredit,
     });
-  }, [currentTime, selectedBeats, beats, style, look, activeBeatOnly, maxTime, authorName, showCreditAtEnd]);
+  }, [currentTime, selectedBeats, beats, style, look, isPlaying, activeBeatOnly, maxTime, authorName, showCreditAtEnd]);
 
   // Playback loop
   useEffect(() => {
@@ -137,11 +245,23 @@ export const FilmCanvasPlayer: React.FC<FilmCanvasPlayerProps> = ({
         currentTimeRef.current = maxTime;
         setCurrentTime(maxTime);
         setIsPlaying(false);
+        stopAudioSource();
         return;
       }
 
       currentTimeRef.current = nextTime;
       setCurrentTime(nextTime);
+
+      const activeBeat = selectedBeats.find(
+        (b) => nextTime >= b.startSec && nextTime < b.endSec
+      );
+      if (activeBeat && !triggeredBeatsRef.current.has(activeBeat.id)) {
+        if (nextTime >= activeBeat.startSec + 0.05) {
+          triggeredBeatsRef.current.add(activeBeat.id);
+          void triggerBeatAudio(activeBeat, Math.max(0, nextTime - (activeBeat.startSec + 0.05)));
+        }
+      }
+
       rafRef.current = requestAnimationFrame(step);
     };
 
@@ -149,31 +269,73 @@ export const FilmCanvasPlayer: React.FC<FilmCanvasPlayerProps> = ({
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [isPlaying, maxTime]);
+  }, [isPlaying, maxTime, selectedBeats, isMuted, audioMap]);
 
-  const handleTogglePlay = () => {
+  useEffect(() => {
+    return () => {
+      stopAudioSource();
+      if (audioCtxRef.current) {
+        audioCtxRef.current.close().catch(() => {});
+      }
+    };
+  }, []);
+
+  const handleTogglePlay = async () => {
     if (isPlaying) {
       setIsPlaying(false);
+      stopAudioSource();
       return;
     }
 
-    if (currentTimeRef.current >= maxTime - 0.1) {
+    await ensureAudioContext();
+    let startAt = currentTimeRef.current;
+    if (startAt >= maxTime - 0.1) {
+      startAt = minTime;
       currentTimeRef.current = minTime;
       setCurrentTime(minTime);
+    }
+
+    triggeredBeatsRef.current.clear();
+    const activeBeat = selectedBeats.find((b) => startAt >= b.startSec && startAt < b.endSec);
+    if (activeBeat) {
+      triggeredBeatsRef.current.add(activeBeat.id);
+      void triggerBeatAudio(activeBeat, Math.max(0, startAt - (activeBeat.startSec + 0.05)));
     }
     setIsPlaying(true);
   };
 
   const handleSeek = (targetTime: number) => {
     const clamped = Math.max(minTime, Math.min(maxTime, targetTime));
+    stopAudioSource();
+    triggeredBeatsRef.current.clear();
     currentTimeRef.current = clamped;
     setCurrentTime(clamped);
+
+    if (isPlaying) {
+      const activeBeat = selectedBeats.find((b) => clamped >= b.startSec && clamped < b.endSec);
+      if (activeBeat) {
+        triggeredBeatsRef.current.add(activeBeat.id);
+        void triggerBeatAudio(activeBeat, Math.max(0, clamped - (activeBeat.startSec + 0.05)));
+      }
+    }
   };
 
-  const handleRestart = () => {
+  const handleRestart = async () => {
+    stopAudioSource();
+    triggeredBeatsRef.current.clear();
     currentTimeRef.current = minTime;
     setCurrentTime(minTime);
+    await ensureAudioContext();
+    const firstBeat = selectedBeats[0];
+    if (firstBeat) {
+      triggeredBeatsRef.current.add(firstBeat.id);
+      void triggerBeatAudio(firstBeat, 0);
+    }
     setIsPlaying(true);
+  };
+
+  const handleToggleMute = () => {
+    setIsMuted((prev) => !prev);
   };
 
   const currentBeat =
@@ -261,6 +423,16 @@ export const FilmCanvasPlayer: React.FC<FilmCanvasPlayerProps> = ({
           >
             <RotateCcw className="w-5 h-5" />
             <span className="hidden sm:inline">Replay</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleToggleMute}
+            aria-label={isMuted ? 'Unmute voice' : 'Mute voice'}
+            className="min-h-[52px] min-w-[52px] px-4 py-3 rounded-xl bg-[#F3F5F2] hover:bg-[#E7EBE6] text-[#1E292B] font-medium text-base flex items-center justify-center gap-2 transition-colors cursor-pointer"
+          >
+            {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+            <span className="hidden sm:inline">{isMuted ? 'Muted' : 'Voice On'}</span>
           </button>
         </div>
       </div>

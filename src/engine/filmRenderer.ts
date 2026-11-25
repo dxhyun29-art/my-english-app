@@ -8,6 +8,7 @@ export interface RenderFrameOptions {
   style: AnimationStyle;
   look: CharacterLook;
   showSubtitles: boolean;
+  isSpeaking?: boolean;
   authorName?: string;
   showEndCredit?: boolean;
 }
@@ -127,7 +128,7 @@ export function renderFilmFrame(
   height: number,
   opts: RenderFrameOptions
 ) {
-  const { beat, beatProgress, style, look, showSubtitles, authorName, showEndCredit } = opts;
+  const { beat, beatProgress, style, look, showSubtitles, isSpeaking, authorName, showEndCredit } = opts;
 
   // Clay style uses authentic 12fps stepped stop-motion cadence
   const t = style === 'clay' ? Math.floor(opts.timeSec * 12) / 12 : opts.timeSec;
@@ -567,12 +568,17 @@ export function renderFilmFrame(
     ctx.stroke();
   }
 
-  // Mouth emotion per beat
+  // Mouth (animated lip-sync when speaking + emotion)
+  const mouthOpen = isSpeaking ? 3 + Math.abs(Math.sin(t * 14)) * 6 : 0;
   ctx.strokeStyle = '#6B3F3B';
   ctx.fillStyle = '#B55B54';
   ctx.lineWidth = 2.6;
-  if (beat.id === 'hook') {
-    // Small surprised "o" gasp when checking the exam calendar
+  if (mouthOpen > 2.5) {
+    ctx.beginPath();
+    ctx.ellipse(0, 22, 7, mouthOpen * 0.7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  } else if (beat.id === 'hook') {
     ctx.beginPath();
     ctx.ellipse(0, 22, 5.5, 6.5, 0, 0, Math.PI * 2);
     ctx.fill();

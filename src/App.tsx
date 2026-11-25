@@ -1,15 +1,89 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Download, Loader2 } from 'lucide-react';
 import { DEFAULT_SCENE_CONFIG, DEFAULT_STORYBOARD } from './data/presets';
-import { AnimationStyle, SceneConfig } from './types';
+import { AnimationStyle, BeatClipAudio, BeatKey, SceneConfig, StoryboardBeat } from './types';
+import { getWavDurationSec } from './utils/audio';
 import { exportFullFilmVideo } from './utils/videoExport';
 import { Step4Video } from './components/Step4Video';
 
 export default function App() {
   const [scene, setScene] = useState<SceneConfig>(DEFAULT_SCENE_CONFIG);
+  const [audioMap, setAudioMap] = useState<Partial<Record<BeatKey, BeatClipAudio>>>({});
+  const [isGeneratingAllAudio, setIsGeneratingAllAudio] = useState(false);
+  const [generatingAudioBeatId, setGeneratingAudioBeatId] = useState<BeatKey | null>(null);
+  const [audioNotice, setAudioNotice] = useState<string | null>(null);
+
   const [isExporting, setIsExporting] = useState(false);
   const [exportPercent, setExportPercent] = useState(0);
   const [exportError, setExportError] = useState<string | null>(null);
+
+  const generateBeatTts = async (beat: StoryboardBeat): Promise<BeatClipAudio> => {
+    const response = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: beat.englishLines,
+        voiceName: scene.voiceName,
+        mood: beat.mood,
+      }),
+    });
+    const contentType = response.headers.get('content-type') || '';
+    const data = contentType.includes('application/json')
+      ? await response.json()
+      : { error: `Voice API returned status ${response.status}.` };
+
+    if (!response.ok || !data.audioBase64) {
+      throw new Error(data.error || `Failed to generate voiceover for ${beat.label}.`);
+    }
+    return {
+      beatId: beat.id,
+      audioBase64: data.audioBase64,
+      mimeType: data.mimeType || 'audio/wav',
+      durationSec: getWavDurationSec(data.audioBase64),
+      spokenText: beat.englishLines,
+    };
+  };
+
+  const handleGenerateSingleBeatAudio = async (beat: StoryboardBeat) => {
+    setAudioNotice(null);
+    setGeneratingAudioBeatId(beat.id);
+    try {
+      const clip = await generateBeatTts(beat);
+      setAudioMap((prev) => ({ ...prev, [beat.id]: clip }));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Voice generation unavailable.';
+      setAudioNotice(
+        `${msg} Browser English voice will play automatically during video playback.`
+      );
+    } finally {
+      setGeneratingAudioBeatId(null);
+    }
+  };
+
+  const handleGenerateAllAudio = async () => {
+    setAudioNotice(null);
+    setIsGeneratingAllAudio(true);
+    try {
+      for (const beat of DEFAULT_STORYBOARD) {
+        setGeneratingAudioBeatId(beat.id);
+        const clip = await generateBeatTts(beat);
+        setAudioMap((prev) => ({ ...prev, [beat.id]: clip }));
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Voice generation unavailable.';
+      setAudioNotice(
+        `${msg} Browser English voice will play automatically during video playback.`
+      );
+    } finally {
+      setGeneratingAudioBeatId(null);
+      setIsGeneratingAllAudio(false);
+    }
+  };
+
+  // Automatically fetch Gemini TTS voiceover on initial load
+  useEffect(() => {
+    void handleGenerateAllAudio();
+  }, []);
 
   const handleStyleChange = (style: AnimationStyle) => {
     setScene((prev) => ({ ...prev, style }));
@@ -24,6 +98,7 @@ export default function App() {
         beats: DEFAULT_STORYBOARD,
         style: scene.style,
         look: scene.look,
+        audioMap,
         authorName: 'Dahyun',
         onProgress: (pct) => setExportPercent(pct),
       });
@@ -85,7 +160,13 @@ export default function App() {
         <Step4Video
           beats={DEFAULT_STORYBOARD}
           scene={scene}
+          audioMap={audioMap}
           onChangeStyle={handleStyleChange}
+          onGenerateAllAudio={handleGenerateAllAudio}
+          onGenerateSingleBeatAudio={handleGenerateSingleBeatAudio}
+          generatingBeatId={generatingAudioBeatId}
+          isGeneratingAllAudio={isGeneratingAllAudio}
+          audioNotice={audioNotice}
         />
       </main>
 

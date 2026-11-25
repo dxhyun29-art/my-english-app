@@ -2,6 +2,8 @@ export type AnimationStyle = '2d' | 'clay' | 'watercolor' | 'live-action';
 
 export type BeatKey = 'hook' | 'problem' | 'turn' | 'close';
 
+export type VoiceName = 'Kore' | 'Zephyr' | 'Puck' | 'Charon';
+
 export interface MovieExpression {
   id: string;
   expression: string;
@@ -22,6 +24,7 @@ export interface SceneConfig {
   characters: string;
   situation: string;
   style: AnimationStyle;
+  voiceName: VoiceName;
   look: CharacterLook;
 }
 
@@ -38,4 +41,10 @@ export interface StoryboardBeat {
   mood: 'anxious' | 'overwhelmed' | 'focused' | 'relieved';
 }
 
-export type AppStep = 'input' | 'scene' | 'storyboard' | 'video' | 'final';
+export interface BeatClipAudio {
+  beatId: BeatKey;
+  audioBase64: string;
+  mimeType: string;
+  durationSec: number;
+  spokenText: string;
+}

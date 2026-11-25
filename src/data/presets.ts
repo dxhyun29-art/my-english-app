@@ -38,6 +38,7 @@ export const DEFAULT_SCENE_CONFIG: SceneConfig = {
   characters: 'A tired Korean college student in a soft knit hoodie',
   situation: 'Final exam is tomorrow morning and five textbook chapters are still unread',
   style: '2d',
+  voiceName: 'Kore',
   look: {
     outfitColor: '#4A6B82',
     outfitLabel: 'Slate Blue Hoodie',

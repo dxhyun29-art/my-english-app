@@ -344,6 +344,74 @@ RULES:
   }
 });
 
+// Generate natural English TTS voiceover for a beat
+app.post('/api/tts', async (req, res) => {
+  try {
+    const { text, voiceName, mood } = req.body as {
+      text: string;
+      voiceName?: 'Kore' | 'Zephyr' | 'Puck' | 'Charon';
+      mood?: string;
+    };
+
+    if (!text || !text.trim()) {
+      return res.status(400).json({ error: 'Text is required for voiceover generation.' });
+    }
+
+    const ai = getAiClient('v1beta');
+    const validVoice = ['Kore', 'Zephyr', 'Puck', 'Charon'].includes(voiceName ?? '')
+      ? voiceName!
+      : 'Kore';
+
+    const styleByMood: Record<string, string> = {
+      anxious: 'Natural university student voice, slightly surprised and brisk, clear English pronunciation',
+      overwhelmed: 'Natural university student voice, tired yet steady and brisk, clear English pronunciation',
+      focused: 'Natural university student voice, inspired and determined, clear brisk English pacing',
+      relieved: 'Natural university student voice, relieved, happy and smiling, clear English pronunciation',
+    };
+
+    const style =
+      styleByMood[mood ?? ''] ?? 'Clear, natural English student voice at a brisk, comfortable pace';
+
+    const interaction = await ai.interactions.create({
+      model: 'gemini-3.8-flash-lite-tts',
+      input: [
+        {
+          type: 'text',
+          text: text.trim(),
+          annotations: [
+            {
+              type: 'speech_metadata',
+              style,
+            },
+          ],
+        },
+      ],
+      response_format: { type: 'audio' },
+      generation_config: {
+        speech_config: [
+          {
+            language: 'en-US',
+            voice: validVoice,
+          },
+        ],
+      },
+    });
+
+    const audio = interaction.output_audio;
+    if (!audio?.data) {
+      return res.status(502).json({ error: 'Voiceover generation returned no audio data.' });
+    }
+
+    res.json({
+      audioBase64: audio.data,
+      mimeType: audio.mime_type || 'audio/wav',
+    });
+  } catch (err) {
+    const { status, message } = handleGeminiError(err);
+    res.status(status).json({ error: message });
+  }
+});
+
 async function startServer() {
   if (process.env.NODE_ENV === 'production') {
     const distDir = path.resolve(__dirname, 'dist');
