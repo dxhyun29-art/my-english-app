@@ -1,0 +1,8 @@
+{
+  "name": "The Night Before The Exam",
+  "description": "Turn English movie expressions into a 30-second animated short film with English subtitles.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
