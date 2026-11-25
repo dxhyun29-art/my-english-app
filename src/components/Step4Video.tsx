@@ -1,38 +1,59 @@
 import React, { useState } from 'react';
-import {
-  ArrowLeft,
-  ArrowRight,
-  CheckCircle2,
-  Film,
-} from 'lucide-react';
-import { BeatKey, SceneConfig, StoryboardBeat } from '../types';
+import { CheckCircle2, Film } from 'lucide-react';
+import { STYLE_OPTIONS } from '../data/presets';
+import { AnimationStyle, BeatKey, SceneConfig, StoryboardBeat } from '../types';
 import { FilmCanvasPlayer, FilmStyleThumbnail } from './FilmCanvasPlayer';
 
 interface Step4VideoProps {
   beats: StoryboardBeat[];
   scene: SceneConfig;
-  onBack: () => void;
-  onNext: () => void;
+  onChangeStyle: (style: AnimationStyle) => void;
 }
 
 export const Step4Video: React.FC<Step4VideoProps> = ({
   beats,
   scene,
-  onBack,
-  onNext,
+  onChangeStyle,
 }) => {
   const [previewMode, setPreviewMode] = useState<'full' | BeatKey>('full');
 
   return (
     <section className="space-y-6">
-      <div className="space-y-2 max-w-2xl">
-        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#1E292B]">
-          Animated Scene Clips & Subtitles
-        </h1>
-        <p className="text-base sm:text-lg text-[#4F5D61] leading-relaxed">
-          Preview each scene clip individually or play all 4 scenes in order as one 30-second
-          animated video with synchronized English subtitles.
-        </p>
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+        <div className="space-y-2 max-w-2xl">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#1E292B]">
+            Animated Scene Clips & Subtitles
+          </h1>
+          <p className="text-base sm:text-lg text-[#4F5D61] leading-relaxed">
+            Preview each scene clip individually or play all 4 scenes in order as one 30-second
+            animated video with synchronized English subtitles.
+          </p>
+        </div>
+
+        {/* Visual Style Switcher */}
+        <div
+          role="group"
+          aria-label="Animation style"
+          className="flex flex-wrap items-center gap-1.5 p-1 bg-[#EAECE8] rounded-xl shrink-0"
+        >
+          {STYLE_OPTIONS.map((opt) => {
+            const active = scene.style === opt.id;
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => onChangeStyle(opt.id)}
+                className={`min-h-[40px] px-3.5 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                  active
+                    ? 'bg-white text-[#1E292B] shadow-sm font-semibold'
+                    : 'text-[#4F5D61] hover:text-[#1E292B]'
+                }`}
+              >
+                {opt.title}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Main Layout: Player + 4 Scene Clips */}
@@ -64,7 +85,8 @@ export const Step4Video: React.FC<Step4VideoProps> = ({
             style={scene.style}
             look={scene.look}
             activeBeatOnly={previewMode === 'full' ? null : previewMode}
-            showCreditAtEnd={false}
+            authorName="Dahyun"
+            showCreditAtEnd={true}
           />
         </div>
 
@@ -137,27 +159,6 @@ export const Step4Video: React.FC<Step4VideoProps> = ({
             })}
           </div>
         </div>
-      </div>
-
-      {/* Navigation Footer */}
-      <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
-        <button
-          type="button"
-          onClick={onBack}
-          className="min-h-[52px] px-6 py-3 rounded-xl bg-white border border-[#D5DBD4] hover:bg-[#F1F4F0] text-[#1E292B] font-semibold text-base flex items-center justify-center gap-2 transition-colors cursor-pointer"
-        >
-          <ArrowLeft className="w-5 h-5" />
-          <span>Back to Storyboard</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={onNext}
-          className="min-h-[54px] px-7 py-3.5 rounded-xl bg-[#3B5B6D] hover:bg-[#304B5A] text-white font-semibold text-base flex items-center justify-center gap-2.5 transition-colors cursor-pointer shadow-sm"
-        >
-          <span>Next: Play & Download Final Video</span>
-          <ArrowRight className="w-5 h-5" />
-        </button>
       </div>
     </section>
   );
